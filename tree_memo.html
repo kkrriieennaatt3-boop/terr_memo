@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>🌳 樹形図メモ（ローカル保存 / GitHub Pages対応）</title>
+  <meta name="description" content="シングルHTMLで動く樹形図メモ。localStorage保存・エクスポート/インポート対応。モバイル最適化。" />
+  <style>
+    /* --------- 基本テーマ（自動でライト/ダーク） --------- */
+    :root{
+      --bg:#0b1020; --surface:#111932; --card:#161f3a; --ink:#e8eefc; --muted:#a5b4d8; --accent:#74a7ff;
+      --line:#24325c; --line2:#33416c; --ink2:#cfe0ff; --chip:#0f1836;
+      --tap:44px; /* タップ領域基準 */
+    }
+    @media (prefers-color-scheme: light){
+      :root{
+        --bg:#f7f9fe; --surface:#ffffff; --card:#f5f7ff; --ink:#0f1b3a; --muted:#5a6b93; --accent:#2d6bff;
+        --line:#dee5ff; --line2:#cdd7ff; --ink2:#1d2a55; --chip:#eef2ff;
+      }
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,'Noto Sans JP',sans-serif}
+
+    /* --------- ヘッダー --------- */
+    header{position:sticky;top:0;z-index:20;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:14px 16px;background:linear-gradient(180deg,rgba(0,0,0,.28),transparent), var(--surface);border-bottom:1px solid var(--line)}
+    .title{font-weight:700;letter-spacing:.01em}
+    .right{display:flex;gap:8px;align-items:center}
+    .pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.85rem;background:var(--chip)}
+
+    /* --------- レイアウト --------- */
+    .wrap{max-width:1100px;margin:0 auto;padding:10px 12px 28px}
+    .toolbar{position:sticky;top:56px;z-index:10;display:flex;flex-wrap:wrap;gap:8px;margin:8px 0;padding:6px 0}
+    button{min-height:var(--tap);padding:8px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--ink);cursor:pointer}
+    button:active{transform:translateY(1px)}
+    button:hover{border-color:var(--accent)}
+
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:16px}
+    @media (max-width: 860px){ .grid{grid-template-columns:1fr} }
+
+    .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px}
+    .hint{color:var(--muted);font-size:.9rem}
+
+    /* --------- ツリー --------- */
+    ul.tree{list-style:none;padding-left:10px;margin:0}
+    ul.tree li{margin:4px 0;padding-left:12px;position:relative}
+    ul.tree li::before{content:"";position:absolute;left:0;top:0.95em;width:8px;height:1px;background:var(--line2)}
+    .node{display:flex;align-items:center;gap:8px;padding:6px;border-radius:10px}
+    .node .label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .toggle{width:26px;height:26px;display:inline-grid;place-items:center;border:1px solid var(--line2);border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink2);background:var(--chip)}
+    .toggle.hidden{visibility:hidden}
+    .node.selected{outline:2px solid var(--accent);background:var(--chip)}
+
+    /* --------- フォーム --------- */
+    input[type="text"], textarea{width:100%;background:var(--chip);color:var(--ink);border:1px solid var(--line2);border-radius:12px;padding:10px;font-size:16px}
+    textarea{min-height:180px}
+    label.small{display:block;margin-bottom:6px;color:var(--muted);font-size:.85rem}
+
+    .footer{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;color:var(--muted);font-size:.9rem}
+    a{color:var(--accent)}
+
+    .help{margin-top:12px}
+    details{background:var(--surface);border:1px dashed var(--line);border-radius:12px;padding:10px}
+    summary{cursor:pointer;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">🌳 樹形図メモ（URL公開OK / ローカル保存）</div>
+    <div class="right">
+      <span id="saveState" class="pill">未保存</span>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="toolbar" role="group" aria-label="操作ツール">
+      <button id="addRoot" aria-label="ルート追加">＋ ルート追加</button>
+      <button id="addChild" aria-label="子ノード追加">＋ 子ノード</button>
+      <button id="renameNode" aria-label="名前変更">✏️ 名前変更</button>
+      <button id="deleteNode" aria-label="削除">🗑️ 削除</button>
+      <button id="expandAll" aria-label="すべて展開">⛓ すべて展開</button>
+      <button id="collapseAll" aria-label="すべて畳む">🔗 すべて畳む</button>
+      <button id="exportJson" aria-label="エクスポート">⬇️ エクスポート</button>
+      <button id="importJson" aria-label="インポート">⬆️ インポート</button>
+      <button id="resetAll" aria-label="全削除">🧹 全データ初期化</button>
+      <input id="importFile" type="file" accept="application/json" style="display:none" />
+    </div>
+
+    <div class="grid">
+      <div class="card" aria-live="polite">
+        <ul id="tree" class="tree"></ul>
+        <div class="footer">
+          <div>選択中パス: <span id="selectedPath" class="muted">—</span></div>
+          <div>最終保存: <span id="lastSaved" class="muted">—</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:4px 0 6px">ノード詳細</h3>
+        <label class="small" for="titleInput">タイトル</label>
+        <input id="titleInput" type="text" placeholder="タイトル" autocomplete="off" />
+        <div style="height:8px"></div>
+        <label class="small" for="noteInput">メモ（任意）</label>
+        <textarea id="noteInput" rows="10" placeholder="このノードのメモ"></textarea>
+        <div class="hint" style="margin-top:8px">入力は自動保存（2秒後）されます。データはこのURLを開いた各端末のブラウザに保存されます。</div>
+      </div>
+    </div>
+
+    <div class="help">
+      <details>
+        <summary>ℹ️ 使い方の概要（タップで開く）</summary>
+        <div class="hint" style="margin-top:8px">
+          <ul>
+            <li>📌 左のツリーでノードを選択 → 右の「タイトル・メモ」を編集すると自動保存。</li>
+            <li>➕ ルート/子ノードで階層追加。ノード左の「＋/−」で開閉。</li>
+            <li>💾 他端末へ移すときは「エクスポート」→ JSON をメールやクラウドで移送 → 先で「インポート」。</li>
+            <li>🧹 「全データ初期化」はこのURL上の保存データを完全に削除します（取り消し不可）。</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    // ====== 設定 ======
+    const STORAGE_KEY = 'treeMemo.v1'; // このURL(origin)ごとに分かれます
+
+    // ====== ユーティリティ ======
+    const uid = () => Math.random().toString(36).slice(2, 10);
+    const nowStr = () => new Date().toLocaleString();
+    const debounce = (fn,ms)=>{let t;return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);}};
+
+    // ====== アプリ状態 ======
+    let state = { tree: [], selectedId: null, changed:false };
+
+    // ====== ストレージ ======
+    function load(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) state.tree = JSON.parse(raw);
+        if (!Array.isArray(state.tree)) state.tree = [];
+      }catch(e){ state.tree = []; }
+    }
+    function save(){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tree));
+      qs('#saveState').textContent = '保存済み';
+      qs('#lastSaved').textContent = nowStr();
+      state.changed = false;
+    }
+    const debounceSave = debounce(save, 2000);
+    function markChanged(){ state.changed = true; qs('#saveState').textContent = '未保存*'; debounceSave(); }
+
+    // ====== DOMヘルパ ======
+    const qs = (s, el=document)=> el.querySelector(s);
+
+    // ====== 検索 ======
+    function findNodeById(list, id, path=[]) {
+      for (let i=0;i<list.length;i++){
+        const n = list[i];
+        if (n.id === id) return { node:n, parent:list, index:i, path };
+        const deep = findNodeById(n.children||[], id, path.concat(n.title||'未命名'));
+        if (deep) return deep;
+      }
+      return null;
+    }
+
+    // ====== 操作 ======
+    function addRoot(){
+      const n = { id:uid(), title:'新しいノード', note:'', children:[], collapsed:false };
+      state.tree.push(n); state.selectedId = n.id; markChanged(); render();
+    }
+    function addChild(){
+      if (!state.selectedId) return;
+      const res = findNodeById(state.tree, state.selectedId); if (!res) return;
+      res.node.children = res.node.children || [];
+      const n = { id:uid(), title:'子ノード', note:'', children:[], collapsed:false };
+      res.node.children.push(n); res.node.collapsed = false; state.selectedId = n.id; markChanged(); render();
+    }
+    function renameNode(){
+      if (!state.selectedId) return; const res = findNodeById(state.tree, state.selectedId); if (!res) return;
+      const t = prompt('新しいタイトル', res.node.title||''); if (t===null) return;
+      res.node.title = (t||'').trim() || '無題'; markChanged(); render();
+    }
+    function deleteNode(){
+      if (!state.selectedId) return; const res = findNodeById(state.tree, state.selectedId); if (!res) return;
+      if (!confirm('このノードを削除しますか？子も消えます。')) return;
+      res.parent.splice(res.index,1); state.selectedId = null; markChanged(); render();
+    }
+    function toggleCollapse(id){ const r = findNodeById(state.tree,id); if(!r) return; r.node.collapsed = !r.node.collapsed; markChanged(); render(); }
+    function selectNode(id){
+      state.selectedId = id; render();
+      const res = findNodeById(state.tree, id);
+      if (res){
+        qs('#titleInput').value = res.node.title||'';
+        qs('#noteInput').value = res.node.note||'';
+        qs('#selectedPath').textContent = res.path.concat(res.node.title||'').join(' / ');
+      } else {
+        qs('#titleInput').value = ''; qs('#noteInput').value=''; qs('#selectedPath').textContent='—';
+      }
+    }
+    function expandAll(){ const walk=l=>l.forEach(n=>{n.collapsed=false;walk(n.children||[])}); walk(state.tree); markChanged(); render(); }
+    function collapseAll(){ const walk=l=>l.forEach(n=>{n.collapsed=true;walk(n.children||[])}); walk(state.tree); markChanged(); render(); }
+
+    // ====== 詳細編集 ======
+    function bindDetails(){
+      const title = qs('#titleInput'); const note = qs('#noteInput');
+      const onInput = ()=>{ if(!state.selectedId) return; const r=findNodeById(state.tree,state.selectedId); if(!r) return; r.node.title = title.value; r.node.note = note.value; markChanged(); render(); };
+      title.addEventListener('input', debounce(onInput,200));
+      note.addEventListener('input', debounce(onInput,200));
+    }
+
+    // ====== I/O ======
+    function exportJson(){
+      const blob = new Blob([JSON.stringify(state.tree,null,2)],{type:'application/json'});
+      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = 'tree-memo.json'; a.click(); URL.revokeObjectURL(url);
+    }
+    function importJson(file){
+      const reader = new FileReader(); reader.onload = (e)=>{
+        try{ const data = JSON.parse(e.target.result); if(!Array.isArray(data)) throw new Error('不正な形式'); state.tree = data; state.selectedId = null; markChanged(); render(); }
+        catch(err){ alert('読み込み失敗: '+err.message); }
+      }; reader.readAsText(file);
+    }
+    function resetAll(){ if(confirm('このURLで保存された全データを削除します。元に戻せません。')){ localStorage.removeItem(STORAGE_KEY); state.tree=[]; state.selectedId=null; render(); save(); }}
+
+    // ====== レンダリング ======
+    function render(){
+      const container = qs('#tree'); container.innerHTML='';
+      const createLi = (n)=>{
+        const li = document.createElement('li');
+        const row = document.createElement('div'); row.className = 'node' + (state.selectedId===n.id?' selected':'');
+        const tg = document.createElement('button'); tg.setAttribute('type','button'); tg.className='toggle'+((n.children&&n.children.length)?'':' hidden'); tg.textContent = n.collapsed?'+':'−'; tg.title='展開/折り畳み'; tg.onclick=(e)=>{e.stopPropagation(); toggleCollapse(n.id)};
+        const label = document.createElement('div'); label.className='label'; label.textContent = n.title||'無題';
+        row.appendChild(tg); row.appendChild(label); row.onclick = ()=> selectNode(n.id);
+        li.appendChild(row);
+        if (!n.collapsed && n.children && n.children.length){
+          const ul = document.createElement('ul'); ul.className='tree'; n.children.forEach(c=> ul.appendChild(createLi(c))); li.appendChild(ul);
+        }
+        return li;
+      };
+      state.tree.forEach(n=> container.appendChild(createLi(n)));
+    }
+
+    // ====== バインド & 起動 ======
+    function bindToolbar(){
+      qs('#addRoot').onclick = addRoot; qs('#addChild').onclick = addChild; qs('#renameNode').onclick = renameNode; qs('#deleteNode').onclick = deleteNode;
+      qs('#expandAll').onclick = expandAll; qs('#collapseAll').onclick = collapseAll; qs('#exportJson').onclick = exportJson; qs('#importJson').onclick = ()=> qs('#importFile').click();
+      qs('#importFile').addEventListener('change', (e)=>{ const f=e.target.files[0]; if(f) importJson(f); e.target.value=''; });
+      qs('#resetAll').onclick = resetAll;
+    }
+
+    function init(){
+      load(); bindToolbar(); bindDetails(); render();
+      qs('#lastSaved').textContent = localStorage.getItem(STORAGE_KEY)? nowStr() : '—';
+      qs('#saveState').textContent = '保存済み';
+      window.addEventListener('beforeunload', (e)=>{ if(state.changed){ e.preventDefault(); e.returnValue=''; } });
+    }
+    init();
+  </script>
+</body>
+</html>
